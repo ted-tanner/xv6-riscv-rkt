@@ -26,6 +26,14 @@ extern char trampoline[]; // trampoline.S
 // must be acquired before any p->lock.
 struct spinlock wait_lock;
 
+// Recursively apply a function to all child threads of a process
+static void apply_to_child_threads(struct proc *p, void (*func)(struct proc *p)) {
+  for (struct proclistnode *node = p->child_thread_list; node; node = node->next) {
+    apply_to_child_threads(node->p, func);
+    func(node->p);
+  }
+}
+
 // Allocate a page for each process's kernel stack.
 // Map it high in memory, followed by an invalid
 // guard page.
@@ -107,7 +115,7 @@ allocpid()
 // and return with p->lock held.
 // If there are no free procs, or a memory allocation fails, return 0.
 static struct proc*
-allocproc(void)
+allocproc(struct proc *thread_parent)
 {
   struct proc *p;
 
@@ -122,7 +130,6 @@ allocproc(void)
   return 0;
 
 found:
-  p->pid = allocpid();
   p->state = USED;
 
   // Allocate a trapframe page.
@@ -133,11 +140,17 @@ found:
   }
 
   // An empty user page table.
-  p->pagetable = proc_pagetable(p);
-  if(p->pagetable == 0){
-    freeproc(p);
-    release(&p->lock);
-    return 0;
+  if (thread_parent) {
+    p->pid = thread_parent->pid;
+    p->pagetable = thread_parent->pagetable;
+  } else {
+    p->pid = allocpid();
+    p->pagetable = proc_pagetable(p);
+    if(p->pagetable == 0){
+      freeproc(p);
+      release(&p->lock);
+      return 0;
+    }
   }
 
   // Set up new context to start executing at forkret,
@@ -155,11 +168,17 @@ found:
 static void
 freeproc(struct proc *p)
 {
+  for (struct proclistnode *child = p->child_thread_list; child; child = child->next) {
+    freeproc(child->p);
+  }
+
   if(p->trapframe)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
-  if(p->pagetable)
-    proc_freepagetable(p->pagetable, p->sz);
+  if (!p->parent_thread) {
+    if(p->pagetable)
+      proc_freepagetable(p->pagetable, p->sz);
+  }
   p->pagetable = 0;
   p->sz = 0;
   p->pid = 0;
@@ -169,6 +188,9 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+
+  p->parent_thread = 0;
+  p->child_thread_list = 0;
 }
 
 // Create a user page table for a given process, with no user memory,
@@ -234,7 +256,7 @@ userinit(void)
 {
   struct proc *p;
 
-  p = allocproc();
+  p = allocproc(0);
   initproc = p;
   
   // allocate one user page and copy initcode's instructions
@@ -284,7 +306,7 @@ fork(void)
   struct proc *p = myproc();
 
   // Allocate process.
-  if((np = allocproc()) == 0){
+  if((np = allocproc(0)) == 0){
     return -1;
   }
 
@@ -400,7 +422,7 @@ wait(uint64 addr)
     // Scan through table looking for exited children.
     havekids = 0;
     for(pp = proc; pp < &proc[NPROC]; pp++){
-      if(pp->parent == p){
+      if(pp->parent == p && !pp->parent_thread){
         // make sure the child isn't still in exit() or swtch().
         acquire(&pp->lock);
 
@@ -579,6 +601,19 @@ wakeup(void *chan)
   }
 }
 
+static void kill_and_awake(struct proc *p) {
+  p->killed = 1;
+  if(p->state == SLEEPING){
+     p->state = RUNNABLE;
+  }
+}
+
+static void lock_kill_and_awake(struct proc *p) {
+  acquire(&p->lock);
+  kill_and_awake(p);
+  release(&p->lock);
+}
+
 // Kill the process with the given pid.
 // The victim won't exit until it tries to return
 // to user space (see usertrap() in trap.c).
@@ -586,21 +621,27 @@ int
 kill(int pid)
 {
   struct proc *p;
+  int retval = -1;
 
   for(p = proc; p < &proc[NPROC]; p++){
     acquire(&p->lock);
+
     if(p->pid == pid){
-      p->killed = 1;
-      if(p->state == SLEEPING){
-        // Wake process from sleep().
-        p->state = RUNNABLE;
+      while (p->parent_thread) {
+        struct proc *parent = p->parent_thread;
+        release(&p->lock);
+        p = parent;
+        acquire(&p->lock);
       }
-      release(&p->lock);
-      return 0;
+
+      apply_to_child_threads(p, &lock_kill_and_awake);
+      kill_and_awake(p);
+
+      retval = 0;
     }
     release(&p->lock);
   }
-  return -1;
+  return retval;
 }
 
 void
