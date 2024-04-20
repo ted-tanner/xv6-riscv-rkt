@@ -27,6 +27,15 @@ sys_fork(void)
   return fork();
 }
 
+uint64 sys_clone(void) {
+  uint64 f_ptr, arg, stack, rktflags;
+  argaddr(0, &f_ptr);
+  argaddr(1, &arg);
+  argaddr(2, &stack);
+  argaddr(3, &rktflags);
+  return clone((void *)f_ptr, (void *)arg, (void *)stack, rktflags);
+}
+
 uint64
 sys_wait(void)
 {
@@ -43,7 +52,20 @@ sys_sbrk(void)
 
   argint(0, &n);
   addr = myproc()->sz;
-  if(growproc(n) < 0)
+  if(growproc(n, 0) < 0)
+    return -1;
+  return addr;
+}
+
+uint64
+sys_sbrkx(void)
+{
+  uint64 addr;
+  int n;
+
+  argint(0, &n);
+  addr = myproc()->sz;
+  if(growproc(n, 1) < 0)
     return -1;
   return addr;
 }

@@ -2,6 +2,7 @@ struct stat;
 
 // system calls
 int fork(void);
+int clone(void (*)(void *), void *, void *, uint64);
 int exit(int) __attribute__((noreturn));
 int wait(int*);
 int pipe(int*);
@@ -19,7 +20,8 @@ int mkdir(const char*);
 int chdir(const char*);
 int dup(int);
 int getpid(void);
-char* sbrk(int);
+char *sbrk(int);
+char *sbrkx(int);
 int sleep(int);
 int uptime(void);
 
@@ -34,7 +36,8 @@ void printf(const char*, ...);
 char* gets(char*, int max);
 uint strlen(const char*);
 void* memset(void*, int, uint);
-void* malloc(uint);
+void *malloc(uint);
+void *mallocx(uint);
 void free(void*);
 int atoi(const char*);
 int memcmp(const void *, const void *, uint);

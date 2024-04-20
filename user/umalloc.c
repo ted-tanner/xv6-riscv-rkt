@@ -44,14 +44,17 @@ free(void *ap)
 }
 
 static Header*
-morecore(uint nu)
+morecore(uint nu, int executable)
 {
-  char *p;
+  void *p;
   Header *hp;
 
   if(nu < 4096)
     nu = 4096;
-  p = sbrk(nu * sizeof(Header));
+  if(executable)
+    p = (char *) sbrkx(nu * sizeof(Header));
+  else
+    p = (char *) sbrk(nu * sizeof(Header));
   if(p == (char*)-1)
     return 0;
   hp = (Header*)p;
@@ -60,9 +63,7 @@ morecore(uint nu)
   return freep;
 }
 
-void*
-malloc(uint nbytes)
-{
+static void *_malloc(uint nbytes, int executable) {
   Header *p, *prevp;
   uint nunits;
 
@@ -84,7 +85,18 @@ malloc(uint nbytes)
       return (void*)(p + 1);
     }
     if(p == freep)
-      if((p = morecore(nunits)) == 0)
+      if((p = morecore(nunits, executable)) == 0)
         return 0;
   }
 }
+
+void*
+malloc(uint nbytes) {
+  return _malloc(nbytes, 0);
+}
+
+void*
+mallocx(uint nbytes) {
+  return _malloc(nbytes, 1);
+}
+

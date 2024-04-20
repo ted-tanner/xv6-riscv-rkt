@@ -28,9 +28,11 @@ struct spinlock wait_lock;
 
 // Recursively apply a function to all child threads of a process
 static void apply_to_child_threads(struct proc *p, void (*func)(struct proc *p)) {
-  for (struct proclistnode *node = p->child_thread_list; node; node = node->next) {
-    apply_to_child_threads(node->p, func);
-    func(node->p);
+  for (int i = 0; i < NPROC; ++i) {
+    if (proc[i].parent == p) {
+      apply_to_child_threads(&proc[i], func);
+      func(&proc[i]);
+    }
   }
 }
 
@@ -115,7 +117,7 @@ allocpid()
 // and return with p->lock held.
 // If there are no free procs, or a memory allocation fails, return 0.
 static struct proc*
-allocproc(struct proc *thread_parent)
+allocproc(pagetable_t pagetable, int pid)
 {
   struct proc *p;
 
@@ -139,10 +141,15 @@ found:
     return 0;
   }
 
+  if (pid) {
+    p->pid = pid;
+  } else {
+    p->pid = allocpid();
+  }
+
   // An empty user page table.
-  if (thread_parent) {
-    p->pid = thread_parent->pid;
-    p->pagetable = thread_parent->pagetable;
+  if (pagetable) {
+    p->pagetable = pagetable;
   } else {
     p->pid = allocpid();
     p->pagetable = proc_pagetable(p);
@@ -168,16 +175,17 @@ found:
 static void
 freeproc(struct proc *p)
 {
-  for (struct proclistnode *child = p->child_thread_list; child; child = child->next) {
-    freeproc(child->p);
+  for (int i = 0; i < NPROC; ++i) {
+    if (proc[i].parent == p) {
+      freeproc(&proc[i]);
+    }
   }
 
   if(p->trapframe)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
-  if (!p->parent_thread) {
-    if(p->pagetable)
-      proc_freepagetable(p->pagetable, p->sz);
+  if (p->pagetable && !p->thread_id) {
+    proc_freepagetable(p->pagetable, p->sz);
   }
   p->pagetable = 0;
   p->sz = 0;
@@ -188,9 +196,10 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
-
-  p->parent_thread = 0;
-  p->child_thread_list = 0;
+  p->tstack = 0;
+  p->rktflags = 0;
+  p->thread_id = 0;
+  p->last_thread_id = 0;
 }
 
 // Create a user page table for a given process, with no user memory,
@@ -256,7 +265,7 @@ userinit(void)
 {
   struct proc *p;
 
-  p = allocproc(0);
+  p = allocproc(0, 0);
   initproc = p;
   
   // allocate one user page and copy initcode's instructions
@@ -279,14 +288,18 @@ userinit(void)
 // Grow or shrink user memory by n bytes.
 // Return 0 on success, -1 on failure.
 int
-growproc(int n)
+growproc(int n, int executable)
 {
   uint64 sz;
   struct proc *p = myproc();
 
   sz = p->sz;
   if(n > 0){
-    if((sz = uvmalloc(p->pagetable, sz, sz + n, PTE_W)) == 0) {
+    int permissions = PTE_W;
+    if (executable) {
+      permissions |= PTE_R|PTE_X|PTE_U;
+    }
+    if((sz = uvmalloc(p->pagetable, sz, sz + n, permissions)) == 0) {
       return -1;
     }
   } else if(n < 0){
@@ -306,7 +319,7 @@ fork(void)
   struct proc *p = myproc();
 
   // Allocate process.
-  if((np = allocproc(0)) == 0){
+  if((np = allocproc(0, 0)) == 0){
     return -1;
   }
 
@@ -345,6 +358,60 @@ fork(void)
   release(&np->lock);
 
   return pid;
+}
+
+int clone(void (*f)(void *), void *arg, void *stack, uint64 rktflags) {
+  struct proc *np;
+  struct proc *p = myproc();
+
+  // Allocate process.
+  if ((np = allocproc(p->pagetable, p->pid)) == 0){
+    return 0;
+  }
+
+  int thread_id = 0;
+  // Find the main thread to get the next thread ID
+  struct proc *main_thread = p;
+  while (main_thread->thread_id) {
+    main_thread = main_thread->parent;
+  }
+
+  acquire(&main_thread->lock);
+  thread_id = ++main_thread->last_thread_id;
+  release(&main_thread->lock);
+
+  np->sz = p->sz;
+  np->rktflags = rktflags;
+  *(np->trapframe) = *(p->trapframe);
+  np->tstack = stack;
+  np->thread_id = thread_id;
+
+  np->context.ra = (uint64) f;
+  np->context.sp = (uint64) stack + PGSIZE;
+
+  np->trapframe->a0 = (uint64) arg;
+  np->trapframe->ra = (uint64) f;
+  np->trapframe->sp = (uint64) stack + PGSIZE;
+
+  // increment reference counts on open file descriptors.
+  for(int i = 0; i < NOFILE; i++)
+    if(p->ofile[i])
+      np->ofile[i] = filedup(p->ofile[i]);
+  np->cwd = idup(p->cwd);
+
+  safestrcpy(np->name, p->name, sizeof(p->name));
+
+  release(&np->lock);
+
+  acquire(&wait_lock);
+  np->parent = p;
+  release(&wait_lock);
+
+  acquire(&np->lock);
+  np->state = RUNNABLE;
+  release(&np->lock);
+
+  return thread_id;
 }
 
 // Pass p's abandoned children to init.
@@ -422,7 +489,7 @@ wait(uint64 addr)
     // Scan through table looking for exited children.
     havekids = 0;
     for(pp = proc; pp < &proc[NPROC]; pp++){
-      if(pp->parent == p && !pp->parent_thread){
+      if(pp->parent == p){
         // make sure the child isn't still in exit() or swtch().
         acquire(&pp->lock);
 
@@ -456,6 +523,8 @@ wait(uint64 addr)
   }
 }
 
+// TODO: Implement join
+
 // Per-CPU process scheduler.
 // Each CPU calls scheduler() after setting itself up.
 // Scheduler never returns.  It loops, doing:
@@ -481,6 +550,7 @@ scheduler(void)
         // to release its lock and then reacquire it
         // before jumping back to us.
         p->state = RUNNING;
+
         c->proc = p;
         swtch(&c->context, &p->context);
 
@@ -627,8 +697,8 @@ kill(int pid)
     acquire(&p->lock);
 
     if(p->pid == pid){
-      while (p->parent_thread) {
-        struct proc *parent = p->parent_thread;
+      while (p->thread_id && p->parent) {
+        struct proc *parent = p->parent;
         release(&p->lock);
         p = parent;
         acquire(&p->lock);
@@ -638,7 +708,11 @@ kill(int pid)
       kill_and_awake(p);
 
       retval = 0;
+
+      release(&p->lock);
+      break;
     }
+    
     release(&p->lock);
   }
   return retval;
@@ -718,7 +792,7 @@ procdump(void)
       state = states[p->state];
     else
       state = "???";
-    printf("%d %s %s", p->pid, state, p->name);
+    printf("%d %s %s %d", p->pid, state, p->name, p->thread_id);
     printf("\n");
   }
 }

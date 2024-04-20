@@ -16,6 +16,7 @@ sub entry {
 }
 	
 entry("fork");
+entry("clone");
 entry("exit");
 entry("wait");
 entry("pipe");
@@ -34,5 +35,6 @@ entry("chdir");
 entry("dup");
 entry("getpid");
 entry("sbrk");
+entry("sbrkx");
 entry("sleep");
 entry("uptime");
