@@ -7,7 +7,7 @@
 #include "defs.h"
 #include "elf.h"
 
-static int loadseg(pde_t *, uint64, struct inode *, uint, uint);
+static int loadseg(pagetable_t, uint64, struct inode *, uint, uint);
 
 int flags2perm(int flags)
 {
@@ -28,7 +28,7 @@ exec(char *path, char **argv)
   struct elfhdr elf;
   struct inode *ip;
   struct proghdr ph;
-  pagetable_t pagetable = 0, oldpagetable;
+  pagetable_t pagetable = {0}, oldpagetable;
   struct proc *p = myproc();
 
   begin_op();
@@ -46,7 +46,7 @@ exec(char *path, char **argv)
   if(elf.magic != ELF_MAGIC)
     goto bad;
 
-  if((pagetable = proc_pagetable(p)) == 0)
+  if((pagetable = proc_pagetable(p)).root == 0)
     goto bad;
 
   // Load program into memory.
@@ -131,7 +131,7 @@ exec(char *path, char **argv)
   return argc; // this ends up in a0, the first argument to main(argc, argv)
 
  bad:
-  if(pagetable)
+  if(pagetable.root)
     proc_freepagetable(pagetable, sz);
   if(ip){
     iunlockput(ip);

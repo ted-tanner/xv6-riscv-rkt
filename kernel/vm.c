@@ -21,8 +21,8 @@ kvmmake(void)
 {
   pagetable_t kpgtbl;
 
-  kpgtbl = (pagetable_t) kalloc();
-  memset(kpgtbl, 0, PGSIZE);
+  kpgtbl.root = (pte_t *) kalloc();
+  memset(kpgtbl.root, 0, PGSIZE);
 
   // uart registers
   kvmmap(kpgtbl, UART0, UART0, PGSIZE, PTE_R | PTE_W);
@@ -64,7 +64,7 @@ kvminithart()
   // wait for any previous writes to the page table memory to finish.
   sfence_vma();
 
-  w_satp(MAKE_SATP(kernel_pagetable));
+  w_satp(MAKE_SATP(kernel_pagetable.root));
 
   // flush stale entries from the TLB.
   sfence_vma();
@@ -88,18 +88,22 @@ walk(pagetable_t pagetable, uint64 va, int alloc)
   if(va >= MAXVA)
     panic("walk");
 
+  // if (va >= TRAMPOLINE) {
+  //   return pagetable.trampoline_pte;
+  // }
+
   for(int level = 2; level > 0; level--) {
-    pte_t *pte = &pagetable[PX(level, va)];
+    pte_t *pte = &pagetable.root[PX(level, va)];
     if(*pte & PTE_V) {
-      pagetable = (pagetable_t)PTE2PA(*pte);
+      pagetable.root = (pte_t *) PTE2PA(*pte);
     } else {
-      if(!alloc || (pagetable = (pde_t*)kalloc()) == 0)
+      if(!alloc || (pagetable.root = (pde_t *) kalloc()) == 0)
         return 0;
-      memset(pagetable, 0, PGSIZE);
-      *pte = PA2PTE(pagetable) | PTE_V;
+      memset(pagetable.root, 0, PGSIZE);
+      *pte = PA2PTE(pagetable.root) | PTE_V;
     }
   }
-  return &pagetable[PX(0, va)];
+  return &pagetable.root[PX(0, va)];
 }
 
 // Look up a virtual address, return the physical address,
@@ -197,10 +201,12 @@ pagetable_t
 uvmcreate()
 {
   pagetable_t pagetable;
-  pagetable = (pagetable_t) kalloc();
-  if(pagetable == 0)
-    return 0;
-  memset(pagetable, 0, PGSIZE);
+  pagetable.root = (pte_t *) kalloc();
+  if(pagetable.root == 0) {
+    pagetable_t empty = {0};
+    return empty;
+  }
+  memset(pagetable.root, 0, PGSIZE);
   return pagetable;
 }
 
@@ -273,17 +279,20 @@ freewalk(pagetable_t pagetable)
 {
   // there are 2^9 = 512 PTEs in a page table.
   for(int i = 0; i < 512; i++){
-    pte_t pte = pagetable[i];
+    pte_t pte = pagetable.root[i];
     if((pte & PTE_V) && (pte & (PTE_R|PTE_W|PTE_X)) == 0){
       // this PTE points to a lower-level page table.
-      uint64 child = PTE2PA(pte);
-      freewalk((pagetable_t)child);
-      pagetable[i] = 0;
+      pagetable_t child = {
+        .root = (pte_t *) PTE2PA(pte),
+        .trampoline_pte = pagetable.trampoline_pte,
+      };
+      freewalk(child);
+      pagetable.root[i] = 0;
     } else if(pte & PTE_V){
       panic("freewalk: leaf");
     }
   }
-  kfree((void*)pagetable);
+  kfree((void*) pagetable.root);
 }
 
 // Free user memory pages,

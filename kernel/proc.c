@@ -6,6 +6,11 @@
 #include "proc.h"
 #include "defs.h"
 
+static void thread_exit_handler(void) {
+  // TODO: Should clean up thread rather than panic
+  panic("Thread exit handler");
+}
+
 struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
@@ -117,7 +122,7 @@ allocpid()
 // and return with p->lock held.
 // If there are no free procs, or a memory allocation fails, return 0.
 static struct proc*
-allocproc(pagetable_t pagetable, int pid)
+allocproc(pagetable_t *pagetable, int pid)
 {
   struct proc *p;
 
@@ -149,11 +154,10 @@ found:
 
   // An empty user page table.
   if (pagetable) {
-    p->pagetable = pagetable;
+    p->pagetable = *pagetable;
   } else {
-    p->pid = allocpid();
     p->pagetable = proc_pagetable(p);
-    if(p->pagetable == 0){
+    if(p->pagetable.root == 0){
       freeproc(p);
       release(&p->lock);
       return 0;
@@ -184,10 +188,12 @@ freeproc(struct proc *p)
   if(p->trapframe)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
-  if (p->pagetable && !p->thread_id) {
+  if (p->pagetable.root && !p->thread_id) {
     proc_freepagetable(p->pagetable, p->sz);
   }
-  p->pagetable = 0;
+
+  pagetable_t empty = {0};
+  p->pagetable = empty;
   p->sz = 0;
   p->pid = 0;
   p->parent = 0;
@@ -211,8 +217,10 @@ proc_pagetable(struct proc *p)
 
   // An empty page table.
   pagetable = uvmcreate();
-  if(pagetable == 0)
-    return 0;
+  if(pagetable.root == 0) {
+    pagetable_t empty = {0};
+    return empty;
+  }
 
   // map the trampoline code (for system call return)
   // at the highest user virtual address.
@@ -221,7 +229,8 @@ proc_pagetable(struct proc *p)
   if(mappages(pagetable, TRAMPOLINE, PGSIZE,
               (uint64)trampoline, PTE_R | PTE_X) < 0){
     uvmfree(pagetable, 0);
-    return 0;
+    pagetable_t empty = {0};
+    return empty;
   }
 
   // map the trapframe page just below the trampoline page, for
@@ -230,7 +239,8 @@ proc_pagetable(struct proc *p)
               (uint64)(p->trapframe), PTE_R | PTE_W) < 0){
     uvmunmap(pagetable, TRAMPOLINE, 1, 0);
     uvmfree(pagetable, 0);
-    return 0;
+    pagetable_t empty = {0};
+    return empty;
   }
 
   return pagetable;
@@ -361,11 +371,12 @@ fork(void)
 }
 
 int clone(void (*f)(void *), void *arg, void *stack, uint64 rktflags) {
+  printf("clone - f: %p, stack: %p\n", f, stack);
   struct proc *np;
   struct proc *p = myproc();
 
   // Allocate process.
-  if ((np = allocproc(p->pagetable, p->pid)) == 0){
+  if ((np = allocproc(&p->pagetable, p->pid)) == 0){
     return 0;
   }
 
@@ -380,18 +391,24 @@ int clone(void (*f)(void *), void *arg, void *stack, uint64 rktflags) {
   thread_id = ++main_thread->last_thread_id;
   release(&main_thread->lock);
 
+  // Init new thread PCB
   np->sz = p->sz;
   np->rktflags = rktflags;
   *(np->trapframe) = *(p->trapframe);
+
   np->tstack = stack;
   np->thread_id = thread_id;
 
-  np->context.ra = (uint64) f;
-  np->context.sp = (uint64) stack + PGSIZE;
-
+  // Pass arg to function f on the new thread
   np->trapframe->a0 = (uint64) arg;
-  np->trapframe->ra = (uint64) f;
+  // Handle the return of the function f
+  np->trapframe->ra = (uint64) &thread_exit_handler;
+  // Set the program counter to the function f for the thread
+  np->trapframe->epc = (uint64) f;
+  // Set the stack pointer to the top of the stack
   np->trapframe->sp = (uint64) stack + PGSIZE;
+
+  // p->trapframe->epc = p->trapframe->ra;
 
   // increment reference counts on open file descriptors.
   for(int i = 0; i < NOFILE; i++)
@@ -549,10 +566,18 @@ scheduler(void)
         // Switch to chosen process.  It is the process's job
         // to release its lock and then reacquire it
         // before jumping back to us.
+        if (p->thread_id) {
+          printf("PING | thread_id: %d, fn: %p, stack: %p\n", p->thread_id, p->context.ra, p->context.sp);
+        }
+
         p->state = RUNNING;
 
         c->proc = p;
         swtch(&c->context, &p->context);
+
+        if (p->thread_id) {
+          printf("PONG\n");
+        }
 
         // Process is done running for now.
         // It should have changed its p->state before coming back.
