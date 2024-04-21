@@ -242,6 +242,7 @@ proc_pagetable(struct proc *p)
     pagetable_t empty = {0};
     return empty;
   }
+  pagetable.tf = p->trapframe;
 
   return pagetable;
 }

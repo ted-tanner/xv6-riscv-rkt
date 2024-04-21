@@ -19,9 +19,11 @@ extern char trampoline[]; // trampoline.S
 pagetable_t
 kvmmake(void)
 {
-  pagetable_t kpgtbl;
+  pagetable_t kpgtbl = {
+    .root = (pte_t *) kalloc(),
+    .tf = 0,
+  };
 
-  kpgtbl.root = (pte_t *) kalloc();
   memset(kpgtbl.root, 0, PGSIZE);
 
   // uart registers
@@ -113,6 +115,11 @@ walkaddr(pagetable_t pagetable, uint64 va)
 
   if(va >= MAXVA)
     return 0;
+
+  if (va >= TRAPFRAME && va < TRAPFRAME + PGSIZE && pagetable.root != kernel_pagetable.root) {
+    printf("walkaddr: va=%p, TRAPFRAME=%p\n", va, pagetable.tf);
+    return (uint64) walkaddr(kernel_pagetable, (uint64) pagetable.tf);
+  }
 
   pte = walk(pagetable, va, 0);
   if(pte == 0)
@@ -281,6 +288,7 @@ freewalk(pagetable_t pagetable)
       // this PTE points to a lower-level page table.
       pagetable_t child = {
         .root = (pte_t *) PTE2PA(pte),
+        .tf = 0,
       };
       freewalk(child);
       pagetable.root[i] = 0;
