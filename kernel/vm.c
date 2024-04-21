@@ -88,10 +88,6 @@ walk(pagetable_t pagetable, uint64 va, int alloc)
   if(va >= MAXVA)
     panic("walk");
 
-  // if (va >= TRAMPOLINE) {
-  //   return pagetable.trampoline_pte;
-  // }
-
   for(int level = 2; level > 0; level--) {
     pte_t *pte = &pagetable.root[PX(level, va)];
     if(*pte & PTE_V) {
@@ -157,6 +153,7 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
   for(;;){
     if((pte = walk(pagetable, a, 1)) == 0)
       return -1;
+
     if(*pte & PTE_V)
       panic("mappages: remap");
     *pte = PA2PTE(pa) | perm | PTE_V;
@@ -198,7 +195,7 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
 // create an empty user page table.
 // returns 0 if out of memory.
 pagetable_t
-uvmcreate()
+uvmcreate(void)
 {
   pagetable_t pagetable;
   pagetable.root = (pte_t *) kalloc();
@@ -284,7 +281,6 @@ freewalk(pagetable_t pagetable)
       // this PTE points to a lower-level page table.
       pagetable_t child = {
         .root = (pte_t *) PTE2PA(pte),
-        .trampoline_pte = pagetable.trampoline_pte,
       };
       freewalk(child);
       pagetable.root[i] = 0;

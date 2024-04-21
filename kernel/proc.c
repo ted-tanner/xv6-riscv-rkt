@@ -140,7 +140,7 @@ found:
   p->state = USED;
 
   // Allocate a trapframe page.
-  if((p->trapframe = (struct trapframe *)kalloc()) == 0){
+  if((p->trapframe = (struct trapframe *) kalloc()) == 0){
     freeproc(p);
     release(&p->lock);
     return 0;
@@ -236,7 +236,7 @@ proc_pagetable(struct proc *p)
   // map the trapframe page just below the trampoline page, for
   // trampoline.S.
   if(mappages(pagetable, TRAPFRAME, PGSIZE,
-              (uint64)(p->trapframe), PTE_R | PTE_W) < 0){
+              (uint64)(p->trapframe), PTE_R | PTE_W) < 0) {
     uvmunmap(pagetable, TRAMPOLINE, 1, 0);
     uvmfree(pagetable, 0);
     pagetable_t empty = {0};
@@ -371,6 +371,7 @@ fork(void)
 }
 
 int clone(void (*f)(void *), void *arg, void *stack, uint64 rktflags) {
+  // TODO: Thread pagetable should be slightly different--the trapframe should be different
   printf("clone - f: %p, stack: %p\n", f, stack);
   struct proc *np;
   struct proc *p = myproc();
