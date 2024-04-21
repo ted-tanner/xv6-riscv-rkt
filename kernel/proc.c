@@ -1,3 +1,4 @@
+#include "rkt.h"
 #include "types.h"
 #include "param.h"
 #include "memlayout.h"
@@ -373,9 +374,11 @@ fork(void)
 
 int clone(void (*f)(void *), void *arg, void *stack, uint64 rktflags) {
   // TODO: Thread pagetable should be slightly different--the trapframe should be different
-  printf("clone - f: %p, stack: %p\n", f, stack);
   struct proc *np;
   struct proc *p = myproc();
+
+  // A thread cannot give a child thread more permissions than it has
+  rktflags |= p->rktflags;
 
   // Allocate process.
   if ((np = allocproc(&p->pagetable, p->pid)) == 0){

@@ -1,3 +1,4 @@
+#include "rkt.h"
 #include "types.h"
 #include "param.h"
 #include "memlayout.h"
@@ -107,30 +108,88 @@ extern uint64 sys_clone(void);
 // An array mapping syscall numbers from syscall.h
 // to the function that handles the system call.
 static uint64 (*syscalls[])(void) = {
-  [SYS_fork] = sys_fork,
-  [SYS_exit] = sys_exit,
-  [SYS_wait] = sys_wait,
-  [SYS_pipe] = sys_pipe,
-  [SYS_read] = sys_read,
-  [SYS_kill] = sys_kill,
-  [SYS_exec] = sys_exec,
-  [SYS_fstat] = sys_fstat,
-  [SYS_chdir] = sys_chdir,
-  [SYS_dup] = sys_dup,
-  [SYS_getpid] = sys_getpid,
-  [SYS_sbrk] = sys_sbrk,
-  [SYS_sleep] = sys_sleep,
-  [SYS_uptime] = sys_uptime,
-  [SYS_open] = sys_open,
-  [SYS_write] = sys_write,
-  [SYS_mknod] = sys_mknod,
-  [SYS_unlink] = sys_unlink,
-  [SYS_link] = sys_link,
-  [SYS_mkdir] = sys_mkdir,
-  [SYS_close] = sys_close,
-  [SYS_sbrkx] = sys_sbrkx,
-  [SYS_clone] = sys_clone,
+    [SYS_fork] = sys_fork,     [SYS_exit] = sys_exit,
+    [SYS_wait] = sys_wait,     [SYS_pipe] = sys_pipe,
+    [SYS_read] = sys_read,     [SYS_kill] = sys_kill,
+    [SYS_exec] = sys_exec,     [SYS_fstat] = sys_fstat,
+    [SYS_chdir] = sys_chdir,   [SYS_dup] = sys_dup,
+    [SYS_getpid] = sys_getpid, [SYS_sbrk] = sys_sbrk,
+    [SYS_sleep] = sys_sleep,   [SYS_uptime] = sys_uptime,
+    [SYS_open] = sys_open,     [SYS_write] = sys_write,
+    [SYS_mknod] = sys_mknod,   [SYS_unlink] = sys_unlink,
+    [SYS_link] = sys_link,     [SYS_mkdir] = sys_mkdir,
+    [SYS_close] = sys_close,   [SYS_sbrkx] = sys_sbrkx,
+    [SYS_clone] = sys_clone,
 };
+
+static int check_rkt_flags(struct proc *p, int syscall_num) {
+  int unauthorized = 0;
+
+  switch (syscall_num) {
+  case SYS_fork:
+    unauthorized = p->rktflags & RKT_RESTRICT_FORK;
+    break;
+  case SYS_pipe:
+    unauthorized = p->rktflags & RKT_RESTRICT_PIPE;
+    break;
+  case SYS_read:
+    unauthorized = p->rktflags & RKT_RESTRICT_READ;
+    break;
+  case SYS_kill:
+    unauthorized = p->rktflags & RKT_RESTRICT_KILL;
+    break;
+  case SYS_exec:
+    unauthorized = p->rktflags & RKT_RESTRICT_EXEC;
+    break;
+  case SYS_fstat:
+    unauthorized = p->rktflags & RKT_RESTRICT_FSTAT;
+    break;
+  case SYS_chdir:
+    unauthorized = p->rktflags & RKT_RESTRICT_CHDIR;
+    break;
+  case SYS_dup:
+    unauthorized = p->rktflags & RKT_RESTRICT_DUP;
+    break;
+  case SYS_getpid:
+    unauthorized = p->rktflags & RKT_RESTRICT_GETPID;
+    break;
+  case SYS_sbrk:
+    unauthorized = p->rktflags & RKT_RESTRICT_SBRK;
+    break;
+  case SYS_uptime:
+    unauthorized = p->rktflags & RKT_RESTRICT_UPTIME;
+    break;
+  case SYS_open:
+    unauthorized = p->rktflags & RKT_RESTRICT_OPEN;
+    break;
+  case SYS_write:
+    unauthorized = p->rktflags & RKT_RESTRICT_WRITE;
+    break;
+  case SYS_mknod:
+    unauthorized = p->rktflags & RKT_RESTRICT_MKNOD;
+    break;
+  case SYS_unlink:
+    unauthorized = p->rktflags & RKT_RESTRICT_UNLINK;
+    break;
+  case SYS_link:
+    unauthorized = p->rktflags & RKT_RESTRICT_LINK;
+    break;
+  case SYS_mkdir:
+    unauthorized = p->rktflags & RKT_RESTRICT_MKDIR;
+    break;
+  case SYS_close:
+    unauthorized = p->rktflags & RKT_RESTRICT_CLOSE;
+    break;
+  case SYS_sbrkx:
+    unauthorized = p->rktflags & RKT_RESTRICT_SBRKX;
+    break;
+  case SYS_clone:
+    unauthorized = p->rktflags & RKT_RESTRICT_CLONE;
+    break;
+  }
+
+  return unauthorized > 0;
+}
 
 void
 syscall(void)
@@ -139,13 +198,23 @@ syscall(void)
   struct proc *p = myproc();
 
   num = p->trapframe->a7;
+
+  if (p->rktflags) {
+    int unauthorized = check_rkt_flags(p, num);
+    
+    if (unauthorized) {
+      printf("%d %s: unauthorized syscall %d\n", p->pid, p->name, num);
+      p->trapframe->a0 = -401; // 401 as in HTTP
+      return;
+    }
+  }
+
   if(num > 0 && num < NELEM(syscalls) && syscalls[num]) {
     // Use num to lookup the system call function for num, call it,
     // and store its return value in p->trapframe->a0
     p->trapframe->a0 = syscalls[num]();
   } else {
-    printf("%d %s: unknown sys call %d\n",
-            p->pid, p->name, num);
+    printf("%d %s: unknown sys call %d\n", p->pid, p->name, num);
     p->trapframe->a0 = -1;
   }
 }

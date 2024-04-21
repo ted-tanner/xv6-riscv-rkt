@@ -1,24 +1,27 @@
+#include "kernel/rkt.h"
 #include "kernel/types.h"
 #include "user/user.h"
 
 #define PGSIZE 4096
 
 void thread_main(void *arg) {
-  // sleep(10);
+  sleep(10);
   printf("Hello from thread!\n");
+
+  int result = exec("sh", 0);
+  printf("Thread exec result: %d\n", result);
+  
   exit(0);
 }
 
 int main(int argc, char *argv[]) {
-  printf("thread_main: %p, main: %p\n", &thread_main, &main);
-
   void *stack = malloc(PGSIZE);
-  int thread_id = clone(&thread_main, 0, stack, 0);
+  int thread_id = clone(&thread_main, 0, stack, RKT_RESTRICT_EXEC | RKT_RESTRICT_KILL);
 
   printf("Hello from main!\n");
-  // printf("Thread ID: %d\n", thread_id);
+  printf("Thread ID: %d\n", thread_id);
 
-  sleep(20);
+  sleep(25);
 
   return 0;
 }
