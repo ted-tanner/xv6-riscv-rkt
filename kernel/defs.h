@@ -84,7 +84,7 @@ void            printfinit(void);
 // proc.c
 int             cpuid(void);
 void            exit(int);
-int             fork(void);
+int             fork(uint64);
 int             clone(void (*f)(void *), void *arg, void *stack, uint64 rktflags);
 int             growproc(int, int);
 void            proc_mapstacks(pagetable_t);

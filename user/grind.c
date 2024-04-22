@@ -105,7 +105,7 @@ go(int which_child)
       unlink("../grindir/../a");
       link(".././b", "/grindir/../a");
     } else if(what == 13){
-      int pid = fork();
+      int pid = fork(0);
       if(pid == 0){
         exit(0);
       } else if(pid < 0){
@@ -114,10 +114,10 @@ go(int which_child)
       }
       wait(0);
     } else if(what == 14){
-      int pid = fork();
+      int pid = fork(0);
       if(pid == 0){
-        fork();
-        fork();
+        fork(0);
+        fork(0);
         exit(0);
       } else if(pid < 0){
         printf("grind: fork failed\n");
@@ -130,7 +130,7 @@ go(int which_child)
       if(sbrk(0) > break0)
         sbrk(-(sbrk(0) - break0));
     } else if(what == 17){
-      int pid = fork();
+      int pid = fork(0);
       if(pid == 0){
         close(open("a", O_CREATE|O_RDWR));
         exit(0);
@@ -145,7 +145,7 @@ go(int which_child)
       kill(pid);
       wait(0);
     } else if(what == 18){
-      int pid = fork();
+      int pid = fork(0);
       if(pid == 0){
         kill(getpid());
         exit(0);
@@ -160,10 +160,10 @@ go(int which_child)
         printf("grind: pipe failed\n");
         exit(1);
       }
-      int pid = fork();
+      int pid = fork(0);
       if(pid == 0){
-        fork();
-        fork();
+        fork(0);
+        fork(0);
         if(write(fds[1], "x", 1) != 1)
           printf("grind: pipe write failed\n");
         char c;
@@ -178,7 +178,7 @@ go(int which_child)
       close(fds[1]);
       wait(0);
     } else if(what == 20){
-      int pid = fork();
+      int pid = fork(0);
       if(pid == 0){
         unlink("a");
         mkdir("a");
@@ -231,7 +231,7 @@ go(int which_child)
         fprintf(2, "grind: pipe failed\n");
         exit(1);
       }
-      int pid1 = fork();
+      int pid1 = fork(0);
       if(pid1 == 0){
         close(bb[0]);
         close(bb[1]);
@@ -250,7 +250,7 @@ go(int which_child)
         fprintf(2, "grind: fork failed\n");
         exit(3);
       }
-      int pid2 = fork();
+      int pid2 = fork(0);
       if(pid2 == 0){
         close(aa[1]);
         close(bb[0]);
@@ -299,7 +299,7 @@ iter()
   unlink("a");
   unlink("b");
   
-  int pid1 = fork();
+  int pid1 = fork(0);
   if(pid1 < 0){
     printf("grind: fork failed\n");
     exit(1);
@@ -310,7 +310,7 @@ iter()
     exit(0);
   }
 
-  int pid2 = fork();
+  int pid2 = fork(0);
   if(pid2 < 0){
     printf("grind: fork failed\n");
     exit(1);
@@ -337,7 +337,7 @@ int
 main()
 {
   while(1){
-    int pid = fork();
+    int pid = fork(0);
     if(pid == 0){
       iter();
       exit(0);

@@ -1,7 +1,7 @@
 struct stat;
 
 // system calls
-int fork(void);
+int fork(uint64 rktflags);
 int clone(void (*)(void *), void *, void *, uint64);
 int exit(int) __attribute__((noreturn));
 int wait(int*);

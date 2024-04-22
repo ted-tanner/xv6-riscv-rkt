@@ -24,7 +24,7 @@ main(int argc, char *argv[])
   memset(data, 'a', sizeof(data));
 
   for(i = 0; i < 4; i++)
-    if(fork() > 0)
+    if(fork(0) > 0)
       break;
 
   printf("write %d\n", i);

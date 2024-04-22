@@ -165,6 +165,8 @@ found:
     }
   }
 
+  p->rktflags = 0;
+
   // Set up new context to start executing at forkret,
   // which returns to user space.
   memset(&p->context, 0, sizeof(p->context));
@@ -324,11 +326,14 @@ growproc(int n, int executable)
 // Create a new process, copying the parent.
 // Sets up child kernel stack to return as if from fork() system call.
 int
-fork(void)
+fork(uint64 rktflags)
 {
   int i, pid;
   struct proc *np;
   struct proc *p = myproc();
+
+  // A process cannot give a child process more permissions than it has
+  rktflags |= p->rktflags;
 
   // Allocate process.
   if((np = allocproc(0, 0)) == 0){
@@ -342,6 +347,7 @@ fork(void)
     return -1;
   }
   np->sz = p->sz;
+  np->rktflags = rktflags;
 
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);

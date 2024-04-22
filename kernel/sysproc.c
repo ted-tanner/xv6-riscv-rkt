@@ -24,7 +24,9 @@ sys_getpid(void)
 uint64
 sys_fork(void)
 {
-  return fork();
+  uint64 rktflags;
+  argaddr(0, &rktflags);
+  return fork(rktflags);
 }
 
 uint64 sys_clone(void) {
